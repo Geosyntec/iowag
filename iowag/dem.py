@@ -94,8 +94,8 @@ def get_boundary_geom(in_ds):
     w = in_ds.meta["width"]
     h = in_ds.meta["height"]
 
-    upperleft = in_ds.xy(0, 0)
-    lowerright = in_ds.xy(h, w)
+    upperleft = Point(in_ds.xy(0, 0))
+    lowerright = Point(in_ds.xy(h, w))
     return box(upperleft.x, lowerright.y, lowerright.x, upperleft.y)
 
 
