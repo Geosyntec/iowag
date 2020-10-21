@@ -16,21 +16,6 @@ from . import dem
 from . import bmp
 
 
-@click.group()
-def main():
-    pass
-
-
-@click.group()
-def dem():
-    pass
-
-
-@click.group()
-def bmp():
-    pass
-
-
 def _get_raster_boundary(rasterpath):
     with rasterio.open(rasterpath, "r") as ds:
         boundary = dem.get_boundary_geom(ds)
@@ -42,7 +27,7 @@ def _get_raster_boundary(rasterpath):
     }
 
 
-def _get_vectory_bounds(vectorpath):
+def _get_vector_bounds(vectorpath):
     with fiona.open(vectorpath, "r") as ds:
         boundary = bmp.get_boundary_geom(ds)
 
@@ -53,7 +38,12 @@ def _get_vectory_bounds(vectorpath):
     }
 
 
-@dem.command()
+@click.group()
+def iowadem():
+    pass
+
+
+@iowadem.command()
 @click.option("--demfolder", default=".", help="Path to the collection of DEMs")
 @click.option("--ext", default="tif", help="the file extension of the DEMs")
 @click.option(
@@ -61,29 +51,81 @@ def _get_vectory_bounds(vectorpath):
     default="rasters.geojson",
     help="file where the boundaries will be saved",
 )
-def build_raster_boundaries(demfolder, ext, dstfile):
+@click.option("--dry-run", is_flag=True)
+def build_raster_boundaries(demfolder, ext, dstfile, dry_run=False):
     pbar = tqdm(Path(demfolder).glob(f"*/*.{ext}"))
-    boundaries = [_get_raster_boundary(dempath) for dempath in pbar]
+    if dry_run:
+        paths = [p for p in pbar]
+        print("\n".join(paths))
+    else:
+        boundaries = [_get_raster_boundary(dempath) for dempath in pbar]
 
-    gdf = geopandas.GeoDataFrame(boundaries)
-    gdf.to_file(dstfile, driver="GeoJSON")
+        gdf = geopandas.GeoDataFrame(boundaries)
+        gdf.to_file(dstfile)
     return 0
 
 
-@bmp.command()
+@click.group()
+def iowabmp():
+    pass
+
+
+@iowabmp.command()
 @click.option("--gdbfolder", default=".", help="Path to the collection of GDBs")
+@click.option("--dstfolder", default=".", help="Output folder for shapefiles")
+@click.option("--dry-run", is_flag=True)
+def preprocess_gdbs(gdbfolder, dstfolder, dry_run=False):
+    pbar = tqdm(Path(gdbfolder).glob(f"*.gdb"))
+    for gdb in pbar:
+        pbar.set_description(gdb.stem)
+        if not dry_run:
+            points = pandas.concat(
+                [
+                    geopandas.read_file(gdb, layer=lyr)
+                    .pipe(fxn)
+                    .assign(bmp=lyr)
+                    .reset_index()
+                    for lyr, fxn in zip(
+                        ["TERRACE", "WASCOB", "POND_DAM"],
+                        [
+                            bmp.process_terraces,
+                            bmp.process_WASCOBs,
+                            bmp.process_pond_dams,
+                        ],
+                    )
+                ],
+                ignore_index=True,
+            ).drop(columns=["index"])
+            points.to_file(Path(dstfolder) / gdb.stem / "BMPs.shp")
+    return 0
+
+
+@iowabmp.command()
+@click.option(
+    "--bmpfolder", default=".", help="Path to the collection of BMP shapefiles"
+)
 @click.option(
     "--dstfile",
-    default="rasters.geojson",
+    default="BMPs.geojson",
     help="file where the boundaries will be saved",
 )
-def build_gdb_boundaries(gdbfolder, dstfile):
-    pbar = tqdm(Path(gdbfolder).glob(f"*/*.gdb"))
-    boundaries = [_get_raster_boundary(dempath) for dempath in pbar]
+@click.option("--dry-run", is_flag=True)
+def build_gdb_boundaries(bmpfolder, dstfile, dry_run=False):
+    pbar = tqdm(Path(bmpfolder).glob("*.shp"))
+    if dry_run:
+        paths = [p for p in pbar]
+        print("\n".join(paths))
+    else:
+        boundaries = [_get_vector_bounds(dempath) for dempath in pbar]
 
-    gdf = geopandas.GeoDataFrame(boundaries)
-    gdf.to_file(dstfile, driver="GeoJSON")
+        gdf = geopandas.GeoDataFrame(boundaries)
+        gdf.to_file(dstfile)
     return 0
+
+
+@click.group()
+def main():
+    pass
 
 
 @main.command

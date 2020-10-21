@@ -34,7 +34,9 @@ setup(
     description="Iowa Ag BMP Assessor",
     entry_points={
         "console_scripts": [
-            "iowag=iowag.cli:main",
+            "iowa=iowag.cli:main",
+            "bmp=iowag.cli:iowabmp",
+            "dem=iowag.cli:iowadem",
         ],
     },
     install_requires=requirements,
