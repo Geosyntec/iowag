@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from shapely.geometry import Polygon, Point, box
 import rasterio
 from rasterio.windows import Window, get_data_window, transform
+from rasterio.merge import merge as merge_tool
 
 import whitebox
 
@@ -97,6 +98,20 @@ def get_boundary_geom(in_ds):
     upperleft = Point(in_ds.xy(0, 0))
     lowerright = Point(in_ds.xy(h, w))
     return box(upperleft.x, lowerright.y, lowerright.x, upperleft.y)
+
+
+def merge_rasters(*in_paths, out_path):
+    dest, xform = merge_tool([str(d) for d in in_paths])
+
+    with rasterio.open(in_paths[0], "r") as first:
+        profile = first.profile
+        profile["transform"] = xform
+        profile["height"] = dest.shape[1]
+        profile["width"] = dest.shape[2]
+        profile["count"] = dest.shape[0]
+
+    with rasterio.open(out_path, "w", **profile) as dst:
+        dst.write(dest)
 
 
 """

@@ -35,8 +35,6 @@ setup(
     entry_points={
         "console_scripts": [
             "iowa=iowag.cli:main",
-            "bmp=iowag.cli:iowabmp",
-            "dem=iowag.cli:iowadem",
         ],
     },
     install_requires=requirements,
