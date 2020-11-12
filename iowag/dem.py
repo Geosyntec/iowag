@@ -7,8 +7,6 @@ import rasterio
 from rasterio.windows import Window, get_data_window, transform
 from rasterio.merge import merge as merge_tool
 
-import whitebox
-
 from . import validate
 
 
@@ -34,25 +32,34 @@ class DEMProcessor:
         self.flow_acc = self.out_folder / f"{self.name}_03_flow_accum.tif"
 
     def flow_accumulation(self):
-        if not self.flow_acc.exists():
-            with get_back_workingdir(self.wbt.work_dir):
-                self.wbt.flow_accumulation_full_workflow(
-                    str(self.raw_dem_path),
-                    out_dem=str(self.dem_path),
-                    out_pntr=str(self.d8_pntr),
-                    out_accum=str(self.flow_acc),
-                )
-        return
+        with get_back_workingdir(self.wbt.work_dir):
+            self.wbt.flow_accumulation_full_workflow(
+                str(self.raw_dem_path),
+                out_dem=str(self.dem_path),
+                out_pntr=str(self.d8_pntr),
+                out_accum=str(self.flow_acc),
+            )
+        return 0
 
-    def watershed(self, in_flowdir, path_to_points, bmp):
-        wshed_path = self.out_folder / f"{self.name}_{bmp}_04_watershed.tif"
+    def snap_points(self, inpoints, outpoints, snapdist=50):
+        with get_back_workingdir(self.wbt.work_dir):
+            self.wbt.snap_pour_points(
+                pour_pts=str(inpoints.resolve()),
+                flow_accum=str(self.flow_acc.resolve()),
+                output=str(outpoints),
+                snap_dist=snapdist,
+            )
+        return 0
+
+    def watershed(self, inpoints, suffix="04_watershed"):
+        wshed_path = self.out_folder / f"{self.name}_{suffix}.tif"
         with get_back_workingdir(self.wbt.work_dir):
             self.wbt.watershed(
                 d8_pntr=str(self.d8_pntr),
-                pour_pts=str(Path(path_to_points).resolve()),
-                output=str(wshed),
+                pour_pts=str(Path(inpoints).resolve()),
+                output=str(wshed_path),
             )
-        return wshed_path
+        return 0
 
 
 def extract_raster_window(in_ds, upperleft, lowerright):
@@ -66,6 +73,7 @@ def extract_raster_window(in_ds, upperleft, lowerright):
 
     meta.update(
         {
+            "driver": "GTiff",
             "height": zone.height,
             "width": zone.width,
             "transform": transform(zone, in_ds.transform),

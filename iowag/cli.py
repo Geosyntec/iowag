@@ -15,6 +15,7 @@ import rasterio
 from shapely.geometry import Point
 import fiona
 import geopandas
+import whitebox
 
 from . import dem
 from . import bmp
@@ -171,6 +172,8 @@ def assign_DEMs_to_BMPs(bmppath, dempath, outjson):
     with Path(outjson).open("w") as out:
         json.dump(all_bmps_dems.to_dict(orient="records"), out)
 
+    return 0
+
 
 @main.command()
 @click.argument("mapfile")
@@ -192,7 +195,7 @@ def extract_zones(mapfile, overwrite):
                 if len(row["dempath"]) > 1:
                     # when the BMPs overlap more than one DEM, merge
                     # them and storm in the emphemeral directory
-                    dempath = Path(tmpdir, "dem.tif")
+                    dempath = Path(tmpdir, "dem.img")
                     dem.merge_rasters(*row["dempath"], out_path=dempath)
                 else:
                     # when the BMPs touch only one raster, use it directly
@@ -208,3 +211,36 @@ def extract_zones(mapfile, overwrite):
             with rasterio.open(final_dem, "w", **meta) as out:
                 out.write(data, indexes=1)
     return 0
+
+
+@main.command()
+@click.option(
+    "--srcfolder", help="top-level directory containing all of the pre-processed data"
+)
+def determine_treated_areas(srcfolder):
+    wbt = whitebox.WhiteboxTools()
+    wbt.work_dir = str(Path(srcfolder).resolve())
+    wbt.verbose = False
+
+    pbar = tqdm(list(Path(wbt.work_dir).glob("*/BMPs.shp")))
+    for shpfile in pbar:
+        pbar.set_description(f"Processing {shpfile.stem}")
+        demfile = (shpfile.parent / "DEM.tif").resolve()
+        snapfile = shpfile.parent.joinpath("BMPs_snapped.shp").resolve()
+        dp = dem.DEMProcessor(wbt, demfile, shpfile.parent)
+
+        pbar.set_description(f"Processing {shpfile.stem} (Flow Acc)")
+        dp.flow_accumulation()
+
+        pbar.set_description(f"Processing {shpfile.stem} (Snap Points)")
+        dp.snap_points(shpfile, snapfile)
+
+        pbar.set_description(f"Processing {shpfile.stem} (Watersheds)")
+        dp.watershed(shpfile, suffix="04a_watershed")
+
+        pbar.set_description(f"Processing {shpfile.stem} (Watersheds, snapped)")
+        dp.watershed(snapfile, suffix="04b_watershed_snapped")
+
+
+def lkjsdfljsdf():
+    pass
