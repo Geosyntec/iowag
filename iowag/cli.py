@@ -21,6 +21,13 @@ from . import dem
 from . import bmp
 
 
+LAYERS = [
+    {"name": "TERRACE", "fxn": bmp.process_terraces, "snap": False},
+    {"name": "WASCOB", "fxn": bmp.process_WASCOBs, "snap": False},
+    {"name": "POND_DAM", "fxn": bmp.process_pond_dams, "snap": True},
+]
+
+
 @click.group()
 def main():
     pass
@@ -31,38 +38,25 @@ def main():
 @click.option("--dstfolder", default=".", help="Output folder for shapefiles")
 @click.option("--dry-run", is_flag=True)
 @click.option("--overwrite", is_flag=True)
-def preprocess_gdbs(gdbfolder, dstfolder, dry_run=False, overwrite=False):
+def merge_gdb_layers(gdbfolder, dstfolder, dry_run=False, overwrite=False):
     pbar = tqdm(list(Path(gdbfolder).glob(f"*.gdb")))
     for gdb in pbar:
         pbar.set_description(gdb.stem)
-        outfile = Path(dstfolder) / gdb.stem / "BMPs.shp"
+        outfile = Path(dstfolder) / gdb.stem / "_for_extents.shp"
         if not dry_run and (overwrite or not outfile.exists()):
             points = pandas.concat(
-                [
-                    geopandas.read_file(gdb, layer=lyr)
-                    .pipe(fxn)
-                    .assign(bmp=lyr)
-                    .reset_index()
-                    for lyr, fxn in zip(
-                        ["TERRACE", "WASCOB", "POND_DAM"],
-                        [
-                            bmp.process_terraces,
-                            bmp.process_WASCOBs,
-                            bmp.process_pond_dams,
-                        ],
-                    )
-                ],
+                [geopandas.read_file(gdb, layer=lyrinfo["name"]) for lyrinfo in LAYERS],
                 ignore_index=True,
-            ).drop(columns=["index"])
+            )
             outfile.parent.mkdir(exist_ok=True, parents=True)
             if not points.empty:
                 points.to_file(outfile)
     return 0
 
 
-def _get_vector_bounds(vectorpath):
+def _get_vector_bounds(vectorpath, offset):
     with fiona.open(vectorpath, "r") as ds:
-        boundary = bmp.get_boundary_geom(ds)
+        boundary = bmp.get_boundary_geom(ds, offset=offset)
 
     return {
         "bmppath": str(vectorpath),
@@ -75,18 +69,21 @@ def _get_vector_bounds(vectorpath):
     "--bmpfolder", default=".", help="Path to the collection of BMP shapefiles"
 )
 @click.option(
+    "--offset", default=1000, help="Buffer around BMP extent that will be included"
+)
+@click.option(
     "--dstfile",
     default="BMPs.geojson",
     help="file where the boundaries will be saved",
 )
 @click.option("--dry-run", is_flag=True)
-def build_gdb_boundaries(bmpfolder, dstfile, dry_run=False):
-    pbar = tqdm(Path(bmpfolder).glob("*/BMPs.shp"))
+def build_gdb_boundaries(bmpfolder, dstfile, offset=1000, dry_run=False):
+    pbar = tqdm(Path(bmpfolder).glob("*/_for_extents.shp"))
     if dry_run:
         paths = [p for p in pbar]
         print("\n".join(paths))
     else:
-        boundaries = [_get_vector_bounds(dempath) for dempath in pbar]
+        boundaries = [_get_vector_bounds(dempath, offset=offset) for dempath in pbar]
 
         gdf = geopandas.GeoDataFrame(boundaries)
         gdf.to_file(dstfile)
@@ -217,6 +214,68 @@ def extract_zones(mapfile, overwrite):
 @click.option(
     "--srcfolder", help="top-level directory containing all of the pre-processed data"
 )
+def flow_accumulation(srcfolder):
+    wbt = whitebox.WhiteboxTools()
+    wbt.work_dir = str(Path(srcfolder).resolve())
+    wbt.verbose = False
+
+    pbar = tqdm(list(Path(wbt.work_dir).glob("*/DEM.tif")))
+    for demfile in pbar:
+        pbar.set_description(f"Processing {demfile.parent.name} (flow acc.)")
+        dp = dem.DEMProcessor(wbt, demfile.resolve(), demfile.parent)
+        dp.flow_accumulation()
+
+    return 0
+
+
+@main.command()
+@click.option(
+    "--srcfolder", help="top-level directory containing all of the pre-processed data"
+)
+@click.option("--dstfolder", default=".", help="Output folder for shapefiles")
+@click.option("--dry-run", is_flag=True)
+@click.option("--overwrite", is_flag=True)
+def compile_pourpoints(srcfolder, dstfolder, dry_run=False, overwrite=False):
+    wbt = whitebox.WhiteboxTools()
+    wbt.work_dir = str(Path(".").resolve())
+    wbt.verbose = False
+
+    dstpath = Path(dstfolder)
+    pbar = tqdm(list(Path(srcfolder).glob("*.gdb")))
+    for gdb in pbar:
+        pbar.set_description(gdb.stem)
+        with TemporaryDirectory() as td:
+            for lyrinfo in LAYERS:
+                tmpfile = Path(td) / f"{lyrinfo['name']}.shp"
+                points = (
+                    geopandas.read_file(gdb, layer=lyrinfo["name"])
+                    .pipe(lyrinfo["fxn"])
+                    .assign(bmp=lyrinfo["name"], snapped=lyrinfo["snap"])
+                    .reset_index()
+                    .drop(columns=["index"])
+                )
+                if not points.empty:
+                    points.to_file(tmpfile)
+                    if lyrinfo["snap"]:
+                        demfile = dstpath / gdb.stem / "DEM.tif"
+                        dp = dem.DEMProcessor(wbt, demfile, dstpath / gdb.stem)
+                        dp.snap_points(tmpfile, tmpfile)
+
+            outfile = dstpath / gdb.stem / "BMPs.shp"
+            if not dry_run and (overwrite or not outfile.exists()):
+                all_points = pandas.concat(
+                    [geopandas.read_file(shp) for shp in Path(td).glob("*.shp")],
+                    ignore_index=True,
+                )
+                outfile.parent.mkdir(exist_ok=True, parents=True)
+                all_points.to_file(outfile)
+    return 0
+
+
+@main.command()
+@click.option(
+    "--srcfolder", help="top-level directory containing all of the pre-processed data"
+)
 def determine_treated_areas(srcfolder):
     wbt = whitebox.WhiteboxTools()
     wbt.work_dir = str(Path(srcfolder).resolve())
@@ -226,21 +285,6 @@ def determine_treated_areas(srcfolder):
     for shpfile in pbar:
         pbar.set_description(f"Processing {shpfile.stem}")
         demfile = (shpfile.parent / "DEM.tif").resolve()
-        snapfile = shpfile.parent.joinpath("BMPs_snapped.shp").resolve()
         dp = dem.DEMProcessor(wbt, demfile, shpfile.parent)
-
-        pbar.set_description(f"Processing {shpfile.stem} (Flow Acc)")
-        dp.flow_accumulation()
-
-        pbar.set_description(f"Processing {shpfile.stem} (Snap Points)")
-        dp.snap_points(shpfile, snapfile)
-
         pbar.set_description(f"Processing {shpfile.stem} (Watersheds)")
-        dp.watershed(shpfile, suffix="04a_watershed")
-
-        pbar.set_description(f"Processing {shpfile.stem} (Watersheds, snapped)")
-        dp.watershed(snapfile, suffix="04b_watershed_snapped")
-
-
-def lkjsdfljsdf():
-    pass
+        dp.watershed(shpfile, suffix="04_watershed")
