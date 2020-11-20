@@ -250,7 +250,7 @@ def compile_pourpoints(srcfolder, dstfolder, dry_run=False, overwrite=False):
                 points = (
                     geopandas.read_file(gdb, layer=lyrinfo["name"])
                     .pipe(lyrinfo["fxn"])
-                    .assign(bmp=lyrinfo["name"], snapped=lyrinfo["snap"])
+                    .assign(snapped=lyrinfo["snap"])
                     .reset_index()
                     .drop(columns=["index"])
                 )
@@ -261,14 +261,18 @@ def compile_pourpoints(srcfolder, dstfolder, dry_run=False, overwrite=False):
                         dp = dem.DEMProcessor(wbt, demfile, dstpath / gdb.stem)
                         dp.snap_points(tmpfile, tmpfile)
 
-            outfile = dstpath / gdb.stem / "BMPs.shp"
+            outdir = dstpath / gdb.stem
             if not dry_run and (overwrite or not outfile.exists()):
                 all_points = pandas.concat(
                     [geopandas.read_file(shp) for shp in Path(td).glob("*.shp")],
                     ignore_index=True,
+                    axis=0,
                 )
-                outfile.parent.mkdir(exist_ok=True, parents=True)
-                all_points.to_file(outfile)
+                outdir.parent.mkdir(exist_ok=True, parents=True)
+                for col in ["isin80s", "isin2010", "isin2016"]:
+                    subset = all_points.loc[lambda df: df[col].eq(1)]
+                    if not subset.empty:
+                        subset.to_file(outdir / f"BMP_{col}.shp")
     return 0
 
 
@@ -281,10 +285,10 @@ def determine_treated_areas(srcfolder):
     wbt.work_dir = str(Path(srcfolder).resolve())
     wbt.verbose = False
 
-    pbar = tqdm(list(Path(wbt.work_dir).glob("*/BMPs.shp")))
+    pbar = tqdm(list(Path(wbt.work_dir).glob("*/BMP*.shp")))
     for shpfile in pbar:
         pbar.set_description(f"Processing {shpfile.stem}")
         demfile = (shpfile.parent / "DEM.tif").resolve()
         dp = dem.DEMProcessor(wbt, demfile, shpfile.parent)
         pbar.set_description(f"Processing {shpfile.stem} (Watersheds)")
-        dp.watershed(shpfile, suffix="04_watershed")
+        dp.watershed(shpfile, suffix=f"04_watershed_{shpfile.stem}")

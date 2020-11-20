@@ -5,16 +5,26 @@ import geopandas
 from . import dem
 
 
+BMPCOLS = ["PRACTICE", "Present80s", "Present2010", "Present2016", "geometry"]
+
+
 def get_boundary_geom(in_ds, offset=1000):
     return box(*in_ds.bounds).buffer(offset)
 
 
 def _smooth_line(line: LineString, res: int = 3):
-    return [line.interpolate(dist) for dist in numpy.arange(0, line.length, res)]
+    return MultiPoint(
+        [line.interpolate(dist) for dist in numpy.arange(0, line.length, res)]
+    )
 
 
 def _mid_point(line: LineString):
     return line.interpolate(0.5, normalized=True)
+
+
+def _fix_ints(df, cols):
+    df = df.assign(**{c: df[c].astype(int) for c in cols})
+    return df
 
 
 def process_terraces(bmp_gdf: geopandas.GeoDataFrame, name: str = "terrace"):
@@ -25,13 +35,14 @@ def process_terraces(bmp_gdf: geopandas.GeoDataFrame, name: str = "terrace"):
 
     points = (
         bmp_gdf.explode()
-        .rename_axis(["obj_id", "geo_id"], axis="index")
-        .geometry.apply(_smooth_line)
+        .reset_index(drop=True)
+        .loc[:, BMPCOLS]
+        .pipe(_fix_ints, filter(lambda c: c.startswith("Present"), BMPCOLS))
+        .rename(columns=lambda c: c.lower().replace("present", "isin"))
+        .assign(geometry=lambda gdf: gdf.geometry.apply(_smooth_line))
         .explode()
-        .rename("geometry")
+        .rename_axis(["obj_id", "geo_id"], axis="index")
         .reset_index()
-        .pipe(geopandas.GeoDataFrame, geometry="geometry", crs=bmp_gdf.crs)
-        .assign(bmp=name)
     )
 
     return points
@@ -50,10 +61,11 @@ def process_pond_dams(bmp_gdf: geopandas.GeoDataFrame):
     points = (
         bmp_gdf.explode()
         .rename_axis(["obj_id", "geo_id"], axis="index")
-        .geometry.apply(_mid_point)
-        .to_frame()
+        .loc[:, BMPCOLS]
+        .pipe(_fix_ints, filter(lambda c: c.startswith("Present"), BMPCOLS))
+        .rename(columns=lambda c: c.lower().replace("present", "isin"))
+        .assign(geometry=lambda gdf: gdf.geometry.apply(_mid_point))
         .reset_index()
-        .assign(bmp="pond dam")
     )
 
     return points
