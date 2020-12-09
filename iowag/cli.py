@@ -24,7 +24,7 @@ from . import bmp
 LAYERS = [
     {"name": "TERRACE", "fxn": bmp.process_terraces, "snap": False},
     {"name": "WASCOB", "fxn": bmp.process_WASCOBs, "snap": False},
-    {"name": "POND_DAM", "fxn": bmp.process_pond_dams, "snap": True},
+    {"name": "POND_DAM", "fxn": bmp.process_pond_dams, "snap": False},
 ]
 
 
