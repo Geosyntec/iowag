@@ -136,16 +136,12 @@ def assign_DEMs_to_BMPs(bmppath, dempath, outjson):
     # find DEMs that wholly contain the BMP extents (don't cross DEM boundires)
     bmpdem = geopandas.sjoin(
         bmps, dems, how="left", op="within", lsuffix="bmp", rsuffix="dem"
-    ).pipe(lambda df: df.join(df.bounds))
+    )
 
     # select only the BMP extents that found a single DEM to fit inside
-    has_dem = bmpdem.loc[
-        bmpdem["dempath"].notnull(),
-        ["bmppath", "dempath", "minx", "miny", "maxx", "maxy"],
-    ].assign(dempath=lambda df: df["dempath"].apply(lambda x: [x]))
+    has_dem = bmpdem.loc[bmpdem["dempath"].notnull(), ["bmppath", "dempath"]]
 
     # find the multiple DEMs for BMP extents that cross DEM boundaries
-    bdcols = ["bmppath", "minx", "miny", "maxx", "maxy"]
     needs_dem = (
         bmpdem.loc[bmpdem["dempath"].isnull()]
         .dropna(axis="columns", how="all")
@@ -157,14 +153,17 @@ def assign_DEMs_to_BMPs(bmppath, dempath, outjson):
             lsuffix="bmp",
             rsuffix="dem",
         )
-        .groupby("bmppath")["dempath"]
-        .apply(lambda g: list(sorted(g)))
-        .to_frame()
-        .reset_index()
-        .merge(bmpdem.loc[:, bdcols], how="left", on="bmppath")
+        .loc[:, ["bmppath", "dempath"]]
     )
 
-    all_bmps_dems = pandas.concat([has_dem, needs_dem], ignore_index=True)
+    all_bmps_dems = (
+        pandas.concat([has_dem, needs_dem], ignore_index=True)
+        .groupby("bmppath")["dempath"]
+        .apply(lambda x: list(set(x)))
+        .to_frame()
+        .join(bmps.set_index("bmppath").bounds)
+        .reset_index()
+    )
 
     with Path(outjson).open("w") as out:
         json.dump(all_bmps_dems.to_dict(orient="records"), out)
