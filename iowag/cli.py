@@ -232,9 +232,7 @@ def flow_accumulation(srcfolder):
     "--srcfolder", help="top-level directory containing all of the pre-processed data"
 )
 @click.option("--dstfolder", default=".", help="Output folder for shapefiles")
-@click.option("--dry-run", is_flag=True)
-@click.option("--overwrite", is_flag=True)
-def compile_pourpoints(srcfolder, dstfolder, dry_run=False, overwrite=False):
+def compile_pourpoints(srcfolder, dstfolder):
     wbt = whitebox.WhiteboxTools()
     wbt.work_dir = str(Path(".").resolve())
     wbt.verbose = False
@@ -246,14 +244,15 @@ def compile_pourpoints(srcfolder, dstfolder, dry_run=False, overwrite=False):
         with TemporaryDirectory() as td:
             for lyrinfo in LAYERS:
                 tmpfile = Path(td) / f"{lyrinfo['name']}.shp"
-                points = (
-                    geopandas.read_file(gdb, layer=lyrinfo["name"])
-                    .pipe(lyrinfo["fxn"])
-                    .assign(snapped=lyrinfo["snap"])
-                    .reset_index()
-                    .drop(columns=["index"])
-                )
-                if not points.empty:
+                raw_shapes = geopandas.read_file(gdb, layer=lyrinfo["name"])
+                if not raw_shapes.empty:
+                    points = (
+                        raw_shapes
+                        .pipe(lyrinfo["fxn"])
+                        .assign(snapped=lyrinfo["snap"])
+                        .reset_index()
+                        .drop(columns=["index"])
+                    )
                     points.to_file(tmpfile)
                     if lyrinfo["snap"]:
                         demfile = dstpath / gdb.stem / "DEM.tif"
@@ -261,17 +260,23 @@ def compile_pourpoints(srcfolder, dstfolder, dry_run=False, overwrite=False):
                         dp.snap_points(tmpfile, tmpfile)
 
             outdir = dstpath / gdb.stem
-            if not dry_run and (overwrite or not outfile.exists()):
+            _gdfs = [geopandas.read_file(shp) for shp in Path(td).glob("*.shp")]
+            if any([not gdf.empty for gdf in _gdfs]):
                 all_points = pandas.concat(
-                    [geopandas.read_file(shp) for shp in Path(td).glob("*.shp")],
+                    _gdfs,
                     ignore_index=True,
                     axis=0,
                 )
                 outdir.parent.mkdir(exist_ok=True, parents=True)
                 for col in ["isin80s", "isin2010", "isin2016"]:
-                    subset = all_points.loc[lambda df: df[col].eq(1)]
+                    subset = (
+                        all_points.loc[lambda df: df[col].eq(1)]
+                        .reset_index(drop=True)
+                        .rename_axis("usid", axis="index")
+                    )
+                    outfile = outdir / f"BMP_{col}.shp"
                     if not subset.empty:
-                        subset.to_file(outdir / f"BMP_{col}.shp")
+                        subset.to_file(outfile)
     return 0
 
 
