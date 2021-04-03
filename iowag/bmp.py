@@ -2,8 +2,6 @@ import numpy
 from shapely.geometry import Point, LineString, Polygon, box, MultiPoint
 import geopandas
 
-from . import dem
-
 
 BMPCOLS = ["PRACTICE", "Present80s", "Present2010", "Present2016", "geometry"]
 
@@ -23,7 +21,7 @@ def _mid_point(line: LineString):
 
 
 def _fix_ints(df, cols):
-    df = df.assign(**{c: df[c].astype(int) for c in cols})
+    df = df.assign(**{c: df[c].replace({None: 0}).astype(int) for c in cols})
     return df
 
 
@@ -57,15 +55,4 @@ def process_pond_dams(bmp_gdf: geopandas.GeoDataFrame):
     Get representative points (locations) for each BMP feature
     in a geopandas geodataframe
     """
-
-    points = (
-        bmp_gdf.explode()
-        .rename_axis(["obj_id", "geo_id"], axis="index")
-        .loc[:, BMPCOLS]
-        .pipe(_fix_ints, filter(lambda c: c.startswith("Present"), BMPCOLS))
-        .rename(columns=lambda c: c.lower().replace("present", "isin"))
-        .assign(geometry=lambda gdf: gdf.geometry.apply(_mid_point))
-        .reset_index()
-    )
-
-    return points
+    return process_terraces(bmp_gdf, name="pond dam")
