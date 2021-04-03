@@ -2,7 +2,11 @@ import os
 from pathlib import Path
 from contextlib import contextmanager
 
+import numpy
+import pandas
+
 from shapely.geometry import Polygon, Point, box
+import geopandas
 import rasterio
 from rasterio.windows import Window, get_data_window, transform
 from rasterio.merge import merge as merge_tool

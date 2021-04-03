@@ -1,24 +1,29 @@
 """Console script for iowag."""
+from contextlib import closing
 import sys
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-
 import click
+from geopandas.tools.overlay import overlay
 from tqdm import tqdm
 
-import pandas
 import numpy
+import pandas
 
 import rasterio
-from shapely.geometry import Point
+from rasterio.windows import Window
+from shapely.geometry import Point, box
 import fiona
 import geopandas
+from tqdm import cli
 import whitebox
 
 from . import dem
 from . import bmp
+from . import validate
+from . import landcover
 
 
 LAYERS = [

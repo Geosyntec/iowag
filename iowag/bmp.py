@@ -2,8 +2,6 @@ import numpy
 from shapely.geometry import Point, LineString, Polygon, box, MultiPoint
 import geopandas
 
-from . import dem
-
 
 BMPCOLS = ["PRACTICE", "Present80s", "Present2010", "Present2016", "geometry"]
 
