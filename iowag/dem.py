@@ -124,3 +124,57 @@ def merge_rasters(*in_paths, out_path):
 
     with rasterio.open(out_path, "w", **profile) as dst:
         dst.write(dest)
+
+
+def categorize_watersheds(inwatersheds, outbmptypes, bmp_shp):
+    practices = ["Pond Dam", "Terrace", "Water and Sediment Control Basin (WASCOB)"]
+    bmps = geopandas.read_file(bmp_shp).assign(usid=lambda df: df["usid"] + 1)
+    with rasterio.open(inwatersheds, "r") as ds:
+        upstream = numpy.ma.masked_less(ds.read(1), 0)
+        upstream_info = ds.meta.copy()
+        upstream_info["nodata"] = 0
+        upstream_info["dtype"] = rasterio.dtypes.int8
+
+    codes = numpy.arange(len(practices)) + 1
+    conditions = [
+        numpy.isin(upstream, bmps.loc[bmps["practice"] == p, "usid"].to_numpy())
+        for p in practices
+    ]
+    cat_raster = numpy.select(conditions, codes, default=0).astype(numpy.int8)
+
+    with rasterio.open(outbmptypes, "w", **upstream_info) as out:
+        out.write(cat_raster, indexes=1)
+    return 0
+
+
+def get_treated_areas(bmpraster):
+    practices = [
+        "Untreated",
+        "Pond Dam",
+        "Terrace",
+        "WASCOB",
+    ]
+    codes = numpy.arange(len(practices) + 1)
+    _practices = dict(zip(codes, practices))
+
+    with rasterio.open(bmpraster, "r") as ds:
+        meta = ds.meta.copy()
+        bmp_types = ds.read(1)
+
+    huc = bmpraster.parent.name.split("_")[-1]
+    era = bmpraster.stem.split("_")[-1]
+    usid, counts = numpy.unique(bmp_types, return_counts=True)
+    area = meta["transform"].a * meta["transform"].e * -1
+
+    treated_area = pandas.DataFrame(
+        {
+            "usid": usid,
+            "practice": [_practices[_u] for _u in usid],
+            "HUC_ID": huc,
+            "era": era,
+            "N_pixels": counts,
+            "treated_area_sq_meters": counts * area,
+        }
+    )
+
+    return treated_area
